@@ -727,18 +727,6 @@ class _MaterialVideoControlsState extends State<_MaterialVideoControls> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
-    if (!(_isInCenterSegment(event.position.dx))) {
-      return;
-    }
-
-    onTap();
-  }
-
-  void _handleTapDown(TapDownDetails details) {
-    if ((_isInCenterSegment(details.localPosition.dx))) {
-      return;
-    }
-
     onTap();
   }
 
@@ -844,7 +832,6 @@ class _MaterialVideoControlsState extends State<_MaterialVideoControls> {
                       child: Listener(
                         onPointerDown: (event) => _handlePointerDown(event),
                         child: GestureDetector(
-                          onTapDown: (details) => _handleTapDown(details),
                           onDoubleTapDown: _handleDoubleTapDown,
                           onLongPress: _theme(context).speedUpOnLongPress ? _handleLongPress : null,
                           onLongPressEnd: _theme(context).speedUpOnLongPress ? _handleLongPressEnd : null,
