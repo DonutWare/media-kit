@@ -38,6 +38,12 @@ G_DEFINE_TYPE(VideoOutput, video_output, G_TYPE_OBJECT)
 static void video_output_dispose(GObject* object) {
   VideoOutput* self = VIDEO_OUTPUT(object);
   self->destroyed = TRUE;
+
+  // Make sure that no more callbacks are invoked from mpv.
+  if (self->render_context) {
+    mpv_render_context_set_update_callback(self->render_context, NULL, NULL);
+  }
+
   // H/W
   if (self->texture_gl) {
     fl_texture_registrar_unregister_texture(self->texture_registrar,
@@ -109,6 +115,8 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
       // OpenGL context must be made current before creating mpv render context.
       gdk_gl_context_realize(self->gdk_gl_context, &error);
       if (error == NULL) {
+        // Make the OpenGL context current.
+        gdk_gl_context_make_current(self->gdk_gl_context);
         // Create |FlTextureGL| and register it.
         self->texture_gl = texture_gl_new(self);
         if (fl_texture_registrar_register_texture(
