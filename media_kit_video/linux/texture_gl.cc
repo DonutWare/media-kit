@@ -11,32 +11,6 @@
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
 
-// EGLImage extension function pointers
-typedef EGLImageKHR (*PFNEGLCREATEIMAGEKHRPROC)(EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, const EGLint *attrib_list);
-typedef EGLBoolean (*PFNEGLDESTROYIMAGEKHRPROC)(EGLDisplay dpy, EGLImageKHR image);
-typedef void (*PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)(GLenum target, GLeglImageOES image);
-
-// Define the extension functions
-#ifndef eglCreateImageKHR
-static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR = NULL;
-#endif
-#ifndef eglDestroyImageKHR
-static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = NULL;
-#endif
-#ifndef glEGLImageTargetTexture2DOES
-static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = NULL;
-#endif
-
-static void init_egl_image_extensions() {
-  static gboolean initialized = FALSE;
-  if (!initialized) {
-    eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
-    eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
-    glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
-    initialized = TRUE;
-  }
-}
-
 struct _TextureGL {
   FlTextureGL parent_instance;
   guint32 name;              // Flutter's texture name
@@ -70,11 +44,14 @@ static void texture_gl_dispose(GObject* object) {
   EGLSurface current_draw = eglGetCurrentSurface(EGL_DRAW);
   EGLSurface current_read = eglGetCurrentSurface(EGL_READ);
   
-  // Clean up Flutter's texture (in Flutter's context)
-  if (self->name != 0) {
+  // Clean up Flutter's texture. It can only be deleted if a context sharing
+  // Flutter's resources is current (i.e. Flutter's platform EGL context);
+  // otherwise it would delete an unrelated texture e.g. from GDK's context.
+  if (self->name != 0 && current_context != EGL_NO_CONTEXT &&
+      gdk_gl_context_get_current() == NULL) {
     glDeleteTextures(1, &self->name);
-    self->name = 0;
   }
+  self->name = 0;
   
   // Clean up EGLImage
   if (self->egl_image != EGL_NO_IMAGE_KHR && video_output != NULL) {
@@ -117,7 +94,6 @@ static void texture_gl_class_init(TextureGLClass* klass) {
 }
 
 TextureGL* texture_gl_new(VideoOutput* video_output) {
-  init_egl_image_extensions();
   TextureGL* self = TEXTURE_GL(g_object_new(texture_gl_get_type(), NULL));
   self->video_output = video_output;
   return self;
@@ -187,6 +163,10 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
           EGL_GL_TEXTURE_2D_KHR,
           (EGLClientBuffer)(guintptr)self->mpv_texture,
           egl_image_attribs);
+      if (self->egl_image == EGL_NO_IMAGE_KHR) {
+        g_printerr("media_kit: TextureGL: Failed to create EGLImage: 0x%x\n",
+                   eglGetError());
+      }
       
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
       glBindTexture(GL_TEXTURE_2D, 0);
@@ -197,8 +177,8 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
       // Switch back to Flutter's context to create/update Flutter's texture
       eglMakeCurrent(flutter_display, flutter_draw, flutter_read, flutter_context);
       
-      // Free previous Flutter texture
-      if (!first_frame && self->name != 0) {
+      // Free previous Flutter texture (or the 1x1 placeholder)
+      if (self->name != 0) {
         glDeleteTextures(1, &self->name);
       }
       
